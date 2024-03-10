@@ -1,41 +1,32 @@
-/*
-Copyright 2024.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package v1
 
 import (
+	"github.com/kloudlite/operator/pkg/constants"
+	rApi "github.com/kloudlite/operator/pkg/operator"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+type Peer struct {
+	Id        int32  `json:"id"`
+	PublicKey string `json:"publicKey"`
+	Endpoint  string `json:"endpoints"`
+}
 
 // ConnectSpec defines the desired state of Connect
 type ConnectSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=255
+	Id int32 `json:"id"`
 
-	// Foo is an example field of Connect. Edit connect_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
-}
+	// later will store to secrets
+	PrivateKey *string `json:"privateKey,omitempty"`
+	PublicKey  *string `json:"publicKey,omitempty"`
+	Ip         *string `json:"ip,omitempty"`
 
-// ConnectStatus defines the observed state of Connect
-type ConnectStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	Endpoint string `json:"endpoints,omitempty"`
+
+	Peers []Peer `json:"peers,omitempty"`
 }
 
 //+kubebuilder:object:root=true
@@ -46,8 +37,28 @@ type Connect struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   ConnectSpec   `json:"spec,omitempty"`
-	Status ConnectStatus `json:"status,omitempty"`
+	Spec   ConnectSpec `json:"spec,omitempty"`
+	Status rApi.Status `json:"status,omitempty"`
+}
+
+func (d *Connect) EnsureGVK() {
+	if d != nil {
+		d.SetGroupVersionKind(GroupVersion.WithKind("Connect"))
+	}
+}
+
+func (d *Connect) GetStatus() *rApi.Status {
+	return &d.Status
+}
+
+func (d *Connect) GetEnsuredLabels() map[string]string {
+	return map[string]string{}
+}
+
+func (d *Connect) GetEnsuredAnnotations() map[string]string {
+	return map[string]string{
+		constants.GVKKey: GroupVersion.WithKind("Connect").String(),
+	}
 }
 
 //+kubebuilder:object:root=true
