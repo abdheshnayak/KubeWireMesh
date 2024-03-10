@@ -1,0 +1,12 @@
+apiVersion: crds.anayak.com.np/v1
+kind: Connect
+metadata:
+  labels:
+    app.kubernetes.io/name: connect
+    app.kubernetes.io/instance: connect-sample
+    app.kubernetes.io/part-of: kubewiremesh
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: kubewiremesh
+  name: connect-sample
+spec:
+  # TODO(user): Add fields here
