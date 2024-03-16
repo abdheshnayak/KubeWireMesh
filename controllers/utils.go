@@ -1,9 +1,6 @@
 package controllers
 
 import (
-	"fmt"
-	"math/rand"
-
 	"github.com/seancfoley/ipaddress-go/ipaddr"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
@@ -14,9 +11,6 @@ type metaData struct {
 	Port      int32
 	ProxyPort int32
 }
-
-type ServiceData map[string]metaData
-type OccupiedPorts map[int32]bool
 
 func Ptr[T any](t T) *T {
 	return &t
@@ -49,19 +43,4 @@ func GetRemoteDeviceIp(deviceOffcet int64) ([]byte, error) {
 	} else {
 		return nil, addressError
 	}
-}
-
-func getRandomPort(existing, newData OccupiedPorts, prefix string) (int32, error) {
-	// generate random port between 1024 and 65535 and return it
-	result := 1024 + rand.Int31n(65535-1024)
-
-	if len(newData) == 65535-1024 {
-		return 0, fmt.Errorf("no available ports")
-	}
-
-	for existing[result] || newData[result] {
-		result = 1024 + rand.Int31n(65535-1024)
-	}
-
-	return result, nil
 }

@@ -34,6 +34,7 @@ import (
 	crdsv1 "github.com/abdheshnayak/kubewiremesh/api/v1"
 	"github.com/abdheshnayak/kubewiremesh/controllers"
 	"github.com/abdheshnayak/kubewiremesh/controllers/env"
+	"github.com/abdheshnayak/kubewiremesh/controllers/server"
 	"github.com/kloudlite/operator/pkg/logging"
 	//+kubebuilder:scaffold:imports
 )
@@ -100,6 +101,15 @@ func main() {
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder
+
+	server := server.New(mgr, logger)
+
+	go func() {
+		if err := server.Run(); err != nil {
+			logger.Errorf(err, "server failed")
+			os.Exit(1)
+		}
+	}()
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")

@@ -4,6 +4,7 @@ go 1.21.1
 
 require (
 	github.com/codingconcepts/env v0.0.0-20200821220118-a8fbf8d84482
+	github.com/gofiber/fiber/v2 v2.52.2
 	github.com/kloudlite/operator v1.0.3
 	github.com/onsi/ginkgo/v2 v2.12.0
 	github.com/onsi/gomega v1.27.10
@@ -14,7 +15,16 @@ require (
 	sigs.k8s.io/controller-runtime v0.16.1
 )
 
-require github.com/seancfoley/bintree v1.2.3 // indirect
+require (
+	github.com/andybalholm/brotli v1.0.5 // indirect
+	github.com/klauspost/compress v1.17.0 // indirect
+	github.com/mattn/go-runewidth v0.0.15 // indirect
+	github.com/rivo/uniseg v0.4.2 // indirect
+	github.com/seancfoley/bintree v1.2.3 // indirect
+	github.com/valyala/bytebufferpool v1.0.0 // indirect
+	github.com/valyala/fasthttp v1.51.0 // indirect
+	github.com/valyala/tcplisten v1.0.0 // indirect
+)
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -38,7 +48,7 @@ require (
 	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/pprof v0.0.0-20230509042627-b1315fad0c5a // indirect
-	github.com/google/uuid v1.4.0 // indirect
+	github.com/google/uuid v1.5.0 // indirect
 	github.com/imdario/mergo v0.3.13 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect

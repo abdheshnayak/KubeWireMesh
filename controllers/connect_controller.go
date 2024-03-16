@@ -2,9 +2,9 @@ package controllers
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -183,27 +183,57 @@ func (r *ConnectReconciler) updateConfigMap(req *rApi.Request[*crdsv1.Connect]) 
 		r.logger.Error(err)
 	}
 
-	var occupiedPorts OccupiedPorts
+	occupiedPorts := PortMap{}
 	if cm, err := rApi.Get(ctx, r.Client, fn.NN("default", fmt.Sprintf("%s-config", obj.Name)), &corev1.ConfigMap{}); err == nil {
 		s := cm.Data["occupiedPorts"]
-		json.Unmarshal([]byte(s), &occupiedPorts)
+		occupiedPorts.ParseBytes([]byte(s))
 	}
 
-	data := ServiceData{}
+	var data PortMap
 
 	for _, svc := range services.Items {
 		for _, port := range svc.Spec.Ports {
-			prt, err := getRandomPort(data)
-			if err != nil {
-				return failed(err)
+			pd := PortData{
+				Namespace: svc.Namespace,
+				Name:      svc.Name,
+				Port:      port.Port,
 			}
 
-			data[prt] = metaData{
-				Namespace: svc.GetNamespace(),
-				Name:      svc.GetName(),
-				Port:      port.Port,
-				ProxyPort: prt,
+			if data.svcExist(pd) {
+				continue
 			}
+
+			if occupiedPorts.svcExist(pd) {
+				data.AddPort(*occupiedPorts.GetPort(pd), pd)
+				continue
+			}
+
+			data.AddPort(data.GetRandomPort(occupiedPorts), pd)
+		}
+	}
+
+	if !data.isEquals(occupiedPorts) {
+		bytes, err := data.ToBytes()
+		if err != nil {
+			return failed(err)
+		}
+
+		cm := &corev1.ConfigMap{
+			TypeMeta: v1.TypeMeta{
+				APIVersion: "v1",
+				Kind:       "ConfigMap",
+			},
+			ObjectMeta: v1.ObjectMeta{
+				Name:      fmt.Sprintf("%s-config", obj.Name),
+				Namespace: "default",
+			},
+			Data: map[string]string{
+				"occupiedPorts": string(bytes),
+			},
+		}
+
+		if err := fn.KubectlApply(ctx, r.Client, cm); err != nil {
+			return failed(err)
 		}
 	}
 
