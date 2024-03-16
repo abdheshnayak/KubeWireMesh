@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -10,6 +12,9 @@ import (
 	crdsv1 "github.com/abdheshnayak/kubewiremesh/api/v1"
 	"github.com/abdheshnayak/kubewiremesh/controllers/env"
 	"github.com/kloudlite/operator/pkg/constants"
+	apiLabels "k8s.io/apimachinery/pkg/labels"
+
+	fn "github.com/kloudlite/operator/pkg/functions"
 	"github.com/kloudlite/operator/pkg/kubectl"
 	"github.com/kloudlite/operator/pkg/logging"
 	rApi "github.com/kloudlite/operator/pkg/operator"
@@ -32,18 +37,24 @@ type ConnectReconciler struct {
 }
 
 const (
-	ConnectNameKey = "anayak.com.np/connect.name"
-	ConnectMarkKey = "anayak.com.np/connect"
+	ConnectNameKey string = "anayak.com.np/kubewiremesh-connect.name"
+	ConnectMarkKey string = "anayak.com.np/kubewiremesh-connect"
+	MarkExposedKey string = "anayak.com.np/kubewiremesh-connect.exposed"
+)
+
+const (
+	KeysAndIpReady string = "KeysAndIpReady"
+	ConfigMapReady string = "ConfigMapReady"
 )
 
 /*
 steps to implement:
-1. ensure private key, public key and ip are set
-2. update configmap from services
-3. replicate service of another cluster
-4. update service from services, to send request to another cluster
-5. update deployment from services, to send request to another cluster
-6. update deployment to get request from another cluster
+1. Ensure private key, public key and ip are set
+2. Update configmap from services
+3. Replicate service of another cluster
+4. Update service from services, to send request to another cluster
+5. Update deployment from services, to send request to another cluster
+6. Update deployment to get request from another cluster
 */
 
 //+kubebuilder:rbac:groups=crds.anayak.com.np,resources=connects,verbs=get;list;watch;create;update;patch;delete
@@ -83,12 +94,128 @@ func (r *ConnectReconciler) Reconcile(ctx context.Context, request ctrl.Request)
 		return step.ReconcilerResponse()
 	}
 
-	// if step := r.reconNodeportConfigAndSvc(req); !step.ShouldProceed() {
-	// 	return step.ReconcilerResponse()
-	// }
+	if step := r.reconKeysAndIp(req); !step.ShouldProceed() {
+		return step.ReconcilerResponse()
+	}
+
+	if step := r.updateConfigMap(req); !step.ShouldProceed() {
+		return step.ReconcilerResponse()
+	}
 
 	req.Object.Status.IsReady = true
 	return ctrl.Result{}, nil
+}
+
+func (r *ConnectReconciler) reconKeysAndIp(req *rApi.Request[*crdsv1.Connect]) stepResult.Result {
+	ctx, obj := req.Context(), req.Object
+	check := rApi.Check{Generation: obj.Generation}
+
+	failed := func(err error) stepResult.Result {
+		return req.CheckFailed(KeysAndIpReady, check, err.Error())
+	}
+
+	updated := false
+
+	if obj.Spec.PrivateKey == nil {
+		pub, priv, err := GenerateWgKeys()
+		if err != nil {
+			return failed(err)
+		}
+
+		obj.Spec.PrivateKey = Ptr(string(priv))
+		obj.Spec.PublicKey = Ptr(string(pub))
+
+		updated = true
+	}
+
+	if obj.Spec.PublicKey == nil {
+		pub, err := GeneratePublicKey(*obj.Spec.PrivateKey)
+		if err != nil {
+			return failed(err)
+		}
+
+		obj.Spec.PublicKey = Ptr(string(pub))
+		updated = true
+	}
+
+	if obj.Spec.Ip == nil {
+		ip, err := GetRemoteDeviceIp(int64(obj.Spec.Id))
+		if err != nil {
+			return failed(err)
+		}
+
+		obj.Spec.Ip = Ptr(string(ip))
+		updated = true
+	}
+
+	if updated {
+		if err := r.Update(ctx, obj); err != nil {
+			return failed(err)
+		}
+	}
+
+	check.Status = true
+	if check != req.Object.Status.Checks[KeysAndIpReady] {
+		fn.MapSet(&req.Object.Status.Checks, KeysAndIpReady, check)
+		if sr := req.UpdateStatus(); !sr.ShouldProceed() {
+			return sr
+		}
+	}
+
+	return req.Next()
+
+}
+
+func (r *ConnectReconciler) updateConfigMap(req *rApi.Request[*crdsv1.Connect]) stepResult.Result {
+	ctx, obj := req.Context(), req.Object
+	check := rApi.Check{Generation: obj.Generation}
+
+	failed := func(err error) stepResult.Result {
+		return req.CheckFailed(ConfigMapReady, check, err.Error())
+	}
+
+	var services corev1.ServiceList
+	if err := r.List(ctx, &services, &client.ListOptions{
+		LabelSelector: apiLabels.SelectorFromValidatedSet(map[string]string{
+			MarkExposedKey: "true",
+		}),
+	}); err != nil {
+		r.logger.Error(err)
+	}
+
+	var occupiedPorts OccupiedPorts
+	if cm, err := rApi.Get(ctx, r.Client, fn.NN("default", fmt.Sprintf("%s-config", obj.Name)), &corev1.ConfigMap{}); err == nil {
+		s := cm.Data["occupiedPorts"]
+		json.Unmarshal([]byte(s), &occupiedPorts)
+	}
+
+	data := ServiceData{}
+
+	for _, svc := range services.Items {
+		for _, port := range svc.Spec.Ports {
+			prt, err := getRandomPort(data)
+			if err != nil {
+				return failed(err)
+			}
+
+			data[prt] = metaData{
+				Namespace: svc.GetNamespace(),
+				Name:      svc.GetName(),
+				Port:      port.Port,
+				ProxyPort: prt,
+			}
+		}
+	}
+
+	check.Status = true
+	if check != req.Object.Status.Checks[ConfigMapReady] {
+		fn.MapSet(&req.Object.Status.Checks, ConfigMapReady, check)
+		if sr := req.UpdateStatus(); !sr.ShouldProceed() {
+			return sr
+		}
+	}
+
+	return req.Next()
 }
 
 func (r *ConnectReconciler) finalize(req *rApi.Request[*crdsv1.Connect]) stepResult.Result {

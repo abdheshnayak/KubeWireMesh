@@ -13,7 +13,7 @@ spec:
     listKind: ConnectList
     plural: connects
     singular: connect
-  scope: Namespaced
+  scope: Cluster
   versions:
   - name: v1
     schema:
@@ -35,13 +35,91 @@ spec:
           spec:
             description: ConnectSpec defines the desired state of Connect
             properties:
-              foo:
-                description: Foo is an example field of Connect. Edit connect_types.go
-                  to remove/update
+              endpoints:
                 type: string
+              id:
+                format: int32
+                maximum: 255
+                minimum: 1
+                type: integer
+              ip:
+                type: string
+              peers:
+                items:
+                  properties:
+                    endpoints:
+                      type: string
+                    id:
+                      format: int32
+                      type: integer
+                    publicKey:
+                      type: string
+                  required:
+                  - endpoints
+                  - id
+                  - publicKey
+                  type: object
+                type: array
+              privateKey:
+                description: later will store to secrets
+                type: string
+              publicKey:
+                type: string
+            required:
+            - id
             type: object
           status:
-            description: ConnectStatus defines the observed state of Connect
+            properties:
+              checks:
+                additionalProperties:
+                  properties:
+                    generation:
+                      format: int64
+                      type: integer
+                    message:
+                      description: State      State  `json:"state"`
+                      type: string
+                    status:
+                      type: boolean
+                  required:
+                  - status
+                  type: object
+                type: object
+              isReady:
+                type: boolean
+              lastReadyGeneration:
+                format: int64
+                type: integer
+              lastReconcileTime:
+                format: date-time
+                type: string
+              message:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              resources:
+                items:
+                  properties:
+                    apiVersion:
+                      description: 'APIVersion defines the versioned schema of this
+                        representation of an object. Servers should convert recognized
+                        schemas to the latest internal value, and may reject unrecognized
+                        values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+                      type: string
+                    kind:
+                      description: 'Kind is a string value representing the REST resource
+                        this object represents. Servers may infer this from the endpoint
+                        the client submits requests to. Cannot be updated. In CamelCase.
+                        More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+                      type: string
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                  required:
+                  - name
+                  - namespace
+                  type: object
+                type: array
             type: object
         type: object
     served: true

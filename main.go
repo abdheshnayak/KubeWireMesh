@@ -33,6 +33,8 @@ import (
 
 	crdsv1 "github.com/abdheshnayak/kubewiremesh/api/v1"
 	"github.com/abdheshnayak/kubewiremesh/controllers"
+	"github.com/abdheshnayak/kubewiremesh/controllers/env"
+	"github.com/kloudlite/operator/pkg/logging"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -67,32 +69,33 @@ func main() {
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   9443,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "589c6b1b.anayak.com.np",
-		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
-		// when the Manager ends. This requires the binary to immediately end when the
-		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
-		// speeds up voluntary leader transitions as the new leader don't have to wait
-		// LeaseDuration time first.
-		//
-		// In the default scaffold provided, the program ends immediately after
-		// the manager stops, so would be fine to enable this option. However,
-		// if you are doing or is intended to do any operation such as perform cleanups
-		// after the manager stops then its usage might be unsafe.
-		// LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
 
+	dev := flag.Bool("dev", false, "enable development mode")
+	if dev != nil {
+		d := false
+		dev = &d
+	}
+
+	logger := logging.NewOrDie(&logging.Options{
+		Name:        "connect",
+		Dev:         *dev,
+		CallerTrace: true,
+	})
+
 	if err = (&controllers.ConnectReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+		Name:   "Connect",
+		Env:    env.GetEnvOrDie(),
+	}).SetupWithManager(mgr, logger); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Connect")
 		os.Exit(1)
 	}

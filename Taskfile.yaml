@@ -1,0 +1,28 @@
+version: 3
+
+tasks:
+  run:
+    cmds:
+      - make install run
+  build:
+    preconditions:
+      - sh: '[[ -n "{{.Version}}" ]]'
+        msg: "var Version is required"
+    silent: true
+    interactive: true
+    env:
+      IMAGE: ghcr.io/abdheshnayak/kubewiremesh:{{.Version}}
+    cmds:
+      - make docker-build docker-push IMG=${IMAGE}
+
+
+  deploy:
+    preconditions:
+      - sh: '[[ -n "{{.Version}}" ]]'
+        msg: "var Version is required"
+    silent: true
+    interactive: true
+    env:
+      IMAGE: ghcr.io/abdheshnayak/kubewiremesh:{{.Version}}
+    cmds:
+      - make deploy IMG=${IMAGE}

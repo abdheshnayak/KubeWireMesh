@@ -31,6 +31,7 @@ type ConnectSpec struct {
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:resource:scope=Cluster
 
 // Connect is the Schema for the connects API
 type Connect struct {
