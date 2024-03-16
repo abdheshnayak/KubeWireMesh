@@ -1,4 +1,4 @@
-package controllers
+package utils
 
 import (
 	"encoding/json"
@@ -61,7 +61,7 @@ func (p *PortMap) portExist(port int32) bool {
 	return ok
 }
 
-func (p *PortMap) svcExist(data PortData) bool {
+func (p *PortMap) SvcExist(data PortData) bool {
 	_, ok := p.services[p.GetSvcKey(data)]
 	return ok
 }
@@ -87,7 +87,7 @@ func (p *PortMap) ToBytes() ([]byte, error) {
 	return json.Marshal(p)
 }
 
-func (p *PortMap) isEquals(o PortMap) bool {
+func (p *PortMap) IsEquals(o PortMap) bool {
 	if len(p.proxyPorts) != len(o.proxyPorts) || len(p.services) != len(o.services) {
 		return false
 	}

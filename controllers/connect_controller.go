@@ -11,6 +11,7 @@ import (
 
 	crdsv1 "github.com/abdheshnayak/kubewiremesh/api/v1"
 	"github.com/abdheshnayak/kubewiremesh/controllers/env"
+	"github.com/abdheshnayak/kubewiremesh/controllers/utils"
 	"github.com/kloudlite/operator/pkg/constants"
 	apiLabels "k8s.io/apimachinery/pkg/labels"
 
@@ -45,6 +46,8 @@ const (
 const (
 	KeysAndIpReady string = "KeysAndIpReady"
 	ConfigMapReady string = "ConfigMapReady"
+
+	VirtualServicesReady string = "VirtualServicesReady"
 )
 
 /*
@@ -117,34 +120,34 @@ func (r *ConnectReconciler) reconKeysAndIp(req *rApi.Request[*crdsv1.Connect]) s
 	updated := false
 
 	if obj.Spec.PrivateKey == nil {
-		pub, priv, err := GenerateWgKeys()
+		pub, priv, err := utils.GenerateWgKeys()
 		if err != nil {
 			return failed(err)
 		}
 
-		obj.Spec.PrivateKey = Ptr(string(priv))
-		obj.Spec.PublicKey = Ptr(string(pub))
+		obj.Spec.PrivateKey = utils.Ptr(string(priv))
+		obj.Spec.PublicKey = utils.Ptr(string(pub))
 
 		updated = true
 	}
 
 	if obj.Spec.PublicKey == nil {
-		pub, err := GeneratePublicKey(*obj.Spec.PrivateKey)
+		pub, err := utils.GeneratePublicKey(*obj.Spec.PrivateKey)
 		if err != nil {
 			return failed(err)
 		}
 
-		obj.Spec.PublicKey = Ptr(string(pub))
+		obj.Spec.PublicKey = utils.Ptr(string(pub))
 		updated = true
 	}
 
 	if obj.Spec.Ip == nil {
-		ip, err := GetRemoteDeviceIp(int64(obj.Spec.Id))
+		ip, err := utils.GetRemoteDeviceIp(int64(obj.Spec.Id))
 		if err != nil {
 			return failed(err)
 		}
 
-		obj.Spec.Ip = Ptr(string(ip))
+		obj.Spec.Ip = utils.Ptr(string(ip))
 		updated = true
 	}
 
@@ -183,27 +186,27 @@ func (r *ConnectReconciler) updateConfigMap(req *rApi.Request[*crdsv1.Connect]) 
 		r.logger.Error(err)
 	}
 
-	occupiedPorts := PortMap{}
+	occupiedPorts := utils.PortMap{}
 	if cm, err := rApi.Get(ctx, r.Client, fn.NN("default", fmt.Sprintf("%s-config", obj.Name)), &corev1.ConfigMap{}); err == nil {
 		s := cm.Data["occupiedPorts"]
 		occupiedPorts.ParseBytes([]byte(s))
 	}
 
-	var data PortMap
+	var data utils.PortMap
 
 	for _, svc := range services.Items {
 		for _, port := range svc.Spec.Ports {
-			pd := PortData{
+			pd := utils.PortData{
 				Namespace: svc.Namespace,
 				Name:      svc.Name,
 				Port:      port.Port,
 			}
 
-			if data.svcExist(pd) {
+			if data.SvcExist(pd) {
 				continue
 			}
 
-			if occupiedPorts.svcExist(pd) {
+			if occupiedPorts.SvcExist(pd) {
 				data.AddPort(*occupiedPorts.GetPort(pd), pd)
 				continue
 			}
@@ -212,7 +215,7 @@ func (r *ConnectReconciler) updateConfigMap(req *rApi.Request[*crdsv1.Connect]) 
 		}
 	}
 
-	if !data.isEquals(occupiedPorts) {
+	if !data.IsEquals(occupiedPorts) {
 		bytes, err := data.ToBytes()
 		if err != nil {
 			return failed(err)
@@ -235,6 +238,19 @@ func (r *ConnectReconciler) updateConfigMap(req *rApi.Request[*crdsv1.Connect]) 
 		if err := fn.KubectlApply(ctx, r.Client, cm); err != nil {
 			return failed(err)
 		}
+
+		for _, p := range obj.Spec.Peers {
+			ip, err := utils.GetRemoteDeviceIp(int64(p.Id))
+			if err != nil {
+				r.logger.Errorf(err, "Failed to get remote device ip for peer %d", p.Id)
+				continue
+			}
+
+			if err := utils.SendBytesToReceiver(ip, bytes); err != nil {
+				r.logger.Errorf(err, "Failed to send occupied ports to %s", ip)
+				continue
+			}
+		}
 	}
 
 	check.Status = true
@@ -245,6 +261,35 @@ func (r *ConnectReconciler) updateConfigMap(req *rApi.Request[*crdsv1.Connect]) 
 		}
 	}
 
+	return req.Next()
+}
+func (r *ConnectReconciler) updateServices(req *rApi.Request[*crdsv1.Connect]) stepResult.Result {
+	// ctx, obj := req.Context(), req.Object
+	// check := rApi.Check{Generation: obj.Generation}
+	//
+	// failed := func(err error) stepResult.Result {
+	// 	return req.CheckFailed(VirtualServicesReady, check, err.Error())
+	// }
+
+	// get latest portman from config and old portMap
+	// accroding to diff, update services and delete if not exist
+
+	// have to maintain two configmap, one for current another for old
+	// current will be updated using Server
+
+	return req.Next()
+}
+
+func (r *ConnectReconciler) updateDeployments(req *rApi.Request[*crdsv1.Connect]) stepResult.Result {
+	// ctx, obj := req.Context(), req.Object
+	// check := rApi.Check{Generation: obj.Generation}
+	//
+	// failed := func(err error) stepResult.Result {
+	// 	return req.CheckFailed(VirtualServicesReady, check, err.Error())
+	// }
+
+	// get latest portman from config
+	// accroding to diff, update deployments and delete if not exist
 	return req.Next()
 }
 
@@ -292,11 +337,9 @@ func (r *ConnectReconciler) SetupWithManager(mgr ctrl.Manager, logger logging.Lo
 			// }
 			//
 			// return result
-
 			return []reconcile.Request{}
 		}))
 	}
 
 	return builder.Complete(r)
-
 }

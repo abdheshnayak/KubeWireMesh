@@ -1,16 +1,9 @@
-package controllers
+package utils
 
 import (
 	"github.com/seancfoley/ipaddress-go/ipaddr"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
-
-type metaData struct {
-	Namespace string
-	Name      string
-	Port      int32
-	ProxyPort int32
-}
 
 func Ptr[T any](t T) *T {
 	return &t
