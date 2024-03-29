@@ -9,7 +9,8 @@ import (
 type Peer struct {
 	Id        int32  `json:"id"`
 	PublicKey string `json:"publicKey"`
-	Endpoint  string `json:"endpoints"`
+
+	Endpoints []string `json:"endpoints"`
 }
 
 // ConnectSpec defines the desired state of Connect
@@ -24,9 +25,8 @@ type ConnectSpec struct {
 	PublicKey  *string `json:"publicKey,omitempty"`
 	Ip         *string `json:"ip,omitempty"`
 
-	Endpoint string `json:"endpoints,omitempty"`
-
-	Peers []Peer `json:"peers,omitempty"`
+	NodePorts []string `json:"nodePorts,omitempty"`
+	Peers     []Peer   `json:"peers,omitempty"`
 }
 
 //+kubebuilder:object:root=true

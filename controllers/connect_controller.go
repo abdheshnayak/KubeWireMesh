@@ -10,9 +10,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	crdsv1 "github.com/abdheshnayak/kubewiremesh/api/v1"
+	"github.com/abdheshnayak/kubewiremesh/controllers/constants"
 	"github.com/abdheshnayak/kubewiremesh/controllers/env"
+	"github.com/abdheshnayak/kubewiremesh/controllers/templates"
+	"github.com/abdheshnayak/kubewiremesh/controllers/types"
 	"github.com/abdheshnayak/kubewiremesh/controllers/utils"
-	"github.com/kloudlite/operator/pkg/constants"
+	cn "github.com/kloudlite/operator/pkg/constants"
 	apiLabels "k8s.io/apimachinery/pkg/labels"
 
 	fn "github.com/kloudlite/operator/pkg/functions"
@@ -22,6 +25,7 @@ import (
 	stepResult "github.com/kloudlite/operator/pkg/operator/step-result"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiErrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -47,6 +51,11 @@ const (
 	KeysAndIpReady string = "KeysAndIpReady"
 	ConfigMapReady string = "ConfigMapReady"
 
+	PeersAvailable string = "PeersAvailable"
+
+	ReceiverReady     string = "ReceiverReady"
+	ReceiverConfReady string = "ReceiverConfReady"
+
 	VirtualServicesReady string = "VirtualServicesReady"
 )
 
@@ -54,6 +63,7 @@ const (
 steps to implement:
 1. Ensure private key, public key and ip are set
 2. Update configmap from services
+
 3. Replicate service of another cluster
 4. Update service from services, to send request to another cluster
 5. Update deployment from services, to send request to another cluster
@@ -93,7 +103,7 @@ func (r *ConnectReconciler) Reconcile(ctx context.Context, request ctrl.Request)
 		return step.ReconcilerResponse()
 	}
 
-	if step := req.EnsureFinalizers(constants.ForegroundFinalizer, constants.CommonFinalizer); !step.ShouldProceed() {
+	if step := req.EnsureFinalizers(cn.ForegroundFinalizer, cn.CommonFinalizer); !step.ShouldProceed() {
 		return step.ReconcilerResponse()
 	}
 
@@ -111,18 +121,14 @@ func (r *ConnectReconciler) Reconcile(ctx context.Context, request ctrl.Request)
 
 func (r *ConnectReconciler) reconKeysAndIp(req *rApi.Request[*crdsv1.Connect]) stepResult.Result {
 	ctx, obj := req.Context(), req.Object
-	check := rApi.Check{Generation: obj.Generation}
-
-	failed := func(err error) stepResult.Result {
-		return req.CheckFailed(KeysAndIpReady, check, err.Error())
-	}
+	check := rApi.NewRunningCheck(KeysAndIpReady, req)
 
 	updated := false
 
 	if obj.Spec.PrivateKey == nil {
 		pub, priv, err := utils.GenerateWgKeys()
 		if err != nil {
-			return failed(err)
+			return check.Failed(err)
 		}
 
 		obj.Spec.PrivateKey = utils.Ptr(string(priv))
@@ -134,7 +140,8 @@ func (r *ConnectReconciler) reconKeysAndIp(req *rApi.Request[*crdsv1.Connect]) s
 	if obj.Spec.PublicKey == nil {
 		pub, err := utils.GeneratePublicKey(*obj.Spec.PrivateKey)
 		if err != nil {
-			return failed(err)
+			return check.Failed(err)
+
 		}
 
 		obj.Spec.PublicKey = utils.Ptr(string(pub))
@@ -144,7 +151,8 @@ func (r *ConnectReconciler) reconKeysAndIp(req *rApi.Request[*crdsv1.Connect]) s
 	if obj.Spec.Ip == nil {
 		ip, err := utils.GetRemoteDeviceIp(int64(obj.Spec.Id))
 		if err != nil {
-			return failed(err)
+			return check.Failed(err)
+
 		}
 
 		obj.Spec.Ip = utils.Ptr(string(ip))
@@ -153,29 +161,16 @@ func (r *ConnectReconciler) reconKeysAndIp(req *rApi.Request[*crdsv1.Connect]) s
 
 	if updated {
 		if err := r.Update(ctx, obj); err != nil {
-			return failed(err)
+			return check.Failed(err)
 		}
 	}
 
-	check.Status = true
-	if check != req.Object.Status.Checks[KeysAndIpReady] {
-		fn.MapSet(&req.Object.Status.Checks, KeysAndIpReady, check)
-		if sr := req.UpdateStatus(); !sr.ShouldProceed() {
-			return sr
-		}
-	}
-
-	return req.Next()
-
+	return check.Completed()
 }
 
 func (r *ConnectReconciler) updateConfigMap(req *rApi.Request[*crdsv1.Connect]) stepResult.Result {
 	ctx, obj := req.Context(), req.Object
-	check := rApi.Check{Generation: obj.Generation}
-
-	failed := func(err error) stepResult.Result {
-		return req.CheckFailed(ConfigMapReady, check, err.Error())
-	}
+	check := rApi.NewRunningCheck(ConfigMapReady, req)
 
 	var services corev1.ServiceList
 	if err := r.List(ctx, &services, &client.ListOptions{
@@ -193,7 +188,6 @@ func (r *ConnectReconciler) updateConfigMap(req *rApi.Request[*crdsv1.Connect]) 
 	}
 
 	var data utils.PortMap
-
 	for _, svc := range services.Items {
 		for _, port := range svc.Spec.Ports {
 			pd := utils.PortData{
@@ -218,7 +212,7 @@ func (r *ConnectReconciler) updateConfigMap(req *rApi.Request[*crdsv1.Connect]) 
 	if !data.IsEquals(occupiedPorts) {
 		bytes, err := data.ToBytes()
 		if err != nil {
-			return failed(err)
+			return check.Failed(err)
 		}
 
 		cm := &corev1.ConfigMap{
@@ -236,7 +230,7 @@ func (r *ConnectReconciler) updateConfigMap(req *rApi.Request[*crdsv1.Connect]) 
 		}
 
 		if err := fn.KubectlApply(ctx, r.Client, cm); err != nil {
-			return failed(err)
+			return check.Failed(err)
 		}
 
 		for _, p := range obj.Spec.Peers {
@@ -253,48 +247,82 @@ func (r *ConnectReconciler) updateConfigMap(req *rApi.Request[*crdsv1.Connect]) 
 		}
 	}
 
-	check.Status = true
-	if check != req.Object.Status.Checks[ConfigMapReady] {
-		fn.MapSet(&req.Object.Status.Checks, ConfigMapReady, check)
-		if sr := req.UpdateStatus(); !sr.ShouldProceed() {
-			return sr
+	return check.Completed()
+}
+
+func (r *ConnectReconciler) ensurePeersAvailable(req *rApi.Request[*crdsv1.Connect]) stepResult.Result {
+	_, obj := req.Context(), req.Object
+	check := rApi.NewRunningCheck(PeersAvailable, req)
+
+	if len(obj.Spec.Peers) == 0 {
+		return check.Failed(fmt.Errorf("No peers available"))
+	}
+
+	return check.Completed()
+}
+
+func (r *ConnectReconciler) reconReceiverWgConf(req *rApi.Request[*crdsv1.Connect]) stepResult.Result {
+	ctx, obj := req.Context(), req.Object
+	check := rApi.NewRunningCheck(ReceiverConfReady, req)
+
+	templateBuildJob, err := templates.Read(templates.WGConfig)
+	if err != nil {
+		return check.Failed(err)
+	}
+
+	o := types.WireguardConfig{}
+
+	b, err := templates.ParseBytes(templateBuildJob, o)
+	if err != nil {
+		return check.Failed(err)
+	}
+
+	secName := fmt.Sprintf("%s-receiver-conf", obj.Name)
+
+	s, err := rApi.Get(ctx, r.Client, fn.NN(constants.CONN_DATA_NS, secName), &corev1.Secret{})
+	if err != nil {
+		if !apiErrors.IsNotFound(err) {
+			return check.Failed(err)
 		}
 	}
 
-	return req.Next()
+	if s != nil {
+		b := s.Data["wg0.conf"]
+		if string(b) == string(b) {
+			return check.Completed()
+		}
+	}
+
+	if err := fn.KubectlApply(ctx, r.Client, &corev1.Secret{
+		TypeMeta: v1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Secret",
+		},
+		ObjectMeta: v1.ObjectMeta{
+			Name:      secName,
+			Namespace: constants.CONN_DATA_NS,
+		},
+		Data: map[string][]byte{
+			"wg0.conf": b,
+		},
+	}); err != nil {
+		return check.Failed(err)
+	}
+
+	return nil
 }
-func (r *ConnectReconciler) updateServices(req *rApi.Request[*crdsv1.Connect]) stepResult.Result {
-	// ctx, obj := req.Context(), req.Object
-	// check := rApi.Check{Generation: obj.Generation}
-	//
-	// failed := func(err error) stepResult.Result {
-	// 	return req.CheckFailed(VirtualServicesReady, check, err.Error())
-	// }
 
-	// get latest portman from config and old portMap
-	// accroding to diff, update services and delete if not exist
-
-	// have to maintain two configmap, one for current another for old
-	// current will be updated using Server
-
-	return req.Next()
+// create receiver pod
+func (r *ConnectReconciler) reconReceiver(req *rApi.Request[*crdsv1.Connect]) stepResult.Result {
+	return nil
 }
 
-func (r *ConnectReconciler) updateDeployments(req *rApi.Request[*crdsv1.Connect]) stepResult.Result {
-	// ctx, obj := req.Context(), req.Object
-	// check := rApi.Check{Generation: obj.Generation}
-	//
-	// failed := func(err error) stepResult.Result {
-	// 	return req.CheckFailed(VirtualServicesReady, check, err.Error())
-	// }
-
-	// get latest portman from config
-	// accroding to diff, update deployments and delete if not exist
-	return req.Next()
+func (r *ConnectReconciler) reconSender(req *rApi.Request[*crdsv1.Connect]) stepResult.Result {
+	return nil
 }
 
 func (r *ConnectReconciler) finalize(req *rApi.Request[*crdsv1.Connect]) stepResult.Result {
-	return req.Finalize()
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
